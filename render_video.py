@@ -283,8 +283,8 @@ def ass_time(seconds):
 
 def escape_ass(text):
     return (
-        text.replace("\\", "")
-            .replace("{", "")
+        text.replace("{", "")
+            
             .replace("}", "")
     )
 
