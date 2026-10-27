@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    # 09:00 AM Sri Lanka time (03:30 UTC)
+    # Daily at 9:00 AM Sri Lanka time
     - cron: '30 3 * * *'
 
 permissions:
@@ -13,38 +13,65 @@ permissions:
 
 jobs:
   generate-video:
-    name: Generate Astro Minute Content
+    name: Generate Astro Minute Video
 
     runs-on: ubuntu-latest
 
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
-      # Download repository files
+      # 1. Download project
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install Python
+      # 2. Install Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Install AI voice dependency
-      - name: Install dependencies
+      # 3. Install FFmpeg and fonts
+      - name: Install video tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-dejavu-core \
+            libass9
+
+      # 4. Install Python packages
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install edge-tts
+          pip install edge-tts pillow
 
-      # Generate script and voice
-      - name: Generate science script and narration
+      # 5. Generate science script and AI voice
+      - name: Generate script and narration
         run: python main.py
 
-      # Save output files
-      - name: Upload generated files
+      # 6. Generate the actual MP4 video
+      - name: Render YouTube Short
+        run: python render_video.py
+
+      # 7. Check video information
+      - name: Check generated video
+        run: |
+          ls -lh output/
+          ffprobe -v error \
+            -show_entries stream=width,height \
+            -of default=noprint_wrappers=1 \
+            output/astro_minute_short.mp4
+
+      # 8. Make video downloadable
+      - name: Upload video and content
         uses: actions/upload-artifact@v4
         with:
-          name: astro-minute-content
-          path: output/
+          name: astro-minute-video
+          path: |
+            output/astro_minute_short.mp4
+            output/narration.mp3
+            output/video_script.json
+            output/background.png
+            output/captions.ass
           if-no-files-found: error
           retention-days: 7
