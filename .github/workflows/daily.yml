@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 
   schedule:
+    # 09:00 AM Sri Lanka time (03:30 UTC)
     - cron: '30 3 * * *'
 
 permissions:
@@ -12,18 +13,38 @@ permissions:
 
 jobs:
   generate-video:
+    name: Generate Astro Minute Content
+
     runs-on: ubuntu-latest
 
     timeout-minutes: 15
 
     steps:
+      # Download repository files
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Install Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Run Astro Minute
+      # Install AI voice dependency
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install edge-tts
+
+      # Generate script and voice
+      - name: Generate science script and narration
         run: python main.py
+
+      # Save output files
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: astro-minute-content
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
