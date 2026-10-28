@@ -3,40 +3,60 @@ name: Astro Minute Daily Automation
 
 on:
   workflow_dispatch:
-    inputs:
-      upload_test:
-        description: "Upload generated video privately to YouTube?"
-        required: true
-        type: boolean
-        default: false
 
   schedule:
-    # 9:00 AM Sri Lanka time
+    # Daily at 9:00 AM Sri Lanka time
+    # 03:30 UTC = 09:00 Asia/Colombo
     - cron: '30 3 * * *'
 
 permissions:
   contents: read
 
+concurrency:
+  group: astro-minute-daily
+  cancel-in-progress: false
+
 jobs:
   generate-video:
-    name: Generate Astro Minute Video
+    name: Generate and Upload Astro Minute Short
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 30
 
     steps:
+
+      # =====================================
+      # STEP 1 - DOWNLOAD PROJECT
+      # =====================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # =====================================
+      # STEP 2 - SET UP PYTHON
+      # =====================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install video tools
+      # =====================================
+      # STEP 3 - INSTALL VIDEO TOOLS
+      # =====================================
+
+      - name: Install FFmpeg and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ffmpeg fonts-dejavu-core libass9
+            ffmpeg \
+            fonts-dejavu-core \
+            libass9
+
+      # =====================================
+      # STEP 4 - INSTALL PYTHON PACKAGES
+      # =====================================
 
       - name: Install Python dependencies
         run: |
@@ -47,21 +67,39 @@ jobs:
             google-auth \
             google-api-python-client
 
-      - name: Generate script and narration
+      # =====================================
+      # STEP 5 - GENERATE CONTENT
+      # =====================================
+
+      - name: Generate science script and narration
         run: python main.py
 
-      - name: Render YouTube Short
+      # =====================================
+      # STEP 6 - GENERATE VIDEO
+      # =====================================
+
+      - name: Render vertical YouTube Short
         run: python render_video.py
+
+      # =====================================
+      # STEP 7 - VALIDATE VIDEO
+      # =====================================
 
       - name: Check generated MP4
         run: |
           test -s output/astro_minute_short.mp4
+          test -s output/video_script.json
+
           ffprobe -v error \
             -show_entries stream=width,height \
             -of default=noprint_wrappers=1 \
             output/astro_minute_short.mp4
 
-      - name: Save generated video
+      # =====================================
+      # STEP 8 - SAVE GENERATED FILES
+      # =====================================
+
+      - name: Save video artifacts
         uses: actions/upload-artifact@v4
         with:
           name: astro-minute-video
@@ -69,12 +107,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload private test to YouTube
-        if: >-
-          ${{
-            github.event_name == 'workflow_dispatch'
-            && inputs.upload_test == true
-          }}
+      # =====================================
+      # STEP 9 - UPLOAD PUBLIC VIDEO
+      # =====================================
+
+      - name: Upload public Short to YouTube
         env:
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
         run: python upload_youtube.py
+
+      # =====================================
+      # STEP 10 - COMPLETION
+      # =====================================
+
+      - name: Automation completed
+        run: |
+          echo "Astro Minute daily workflow completed."
