@@ -8,29 +8,27 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+# ==========================================
+# ASTRO MINUTE YOUTUBE UPLOADER
+# ==========================================
+
 OUTPUT = Path("output")
-VIDEO = OUTPUT / "astro_minute_short.mp4"
-METADATA = OUTPUT / "video_script.json"
+VIDEO_FILE = OUTPUT / "astro_minute_short.mp4"
+METADATA_FILE = OUTPUT / "video_script.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload"
 ]
 
+PRIVACY = "public"
 
-def main():
-    print("Starting Astro Minute YouTube upload...")
 
-    if not VIDEO.is_file():
-        raise FileNotFoundError("Video MP4 not found")
-
-    if not METADATA.is_file():
-        raise FileNotFoundError("Video metadata not found")
-
+def get_credentials():
     token_json = os.environ.get("YOUTUBE_TOKEN_JSON")
 
     if not token_json:
         raise RuntimeError(
-            "YOUTUBE_TOKEN_JSON secret is missing"
+            "YOUTUBE_TOKEN_JSON GitHub secret is missing."
         )
 
     token_data = json.loads(token_json)
@@ -42,11 +40,45 @@ def main():
 
     if not credentials.valid:
         if credentials.refresh_token:
+            print("Refreshing YouTube access token...")
             credentials.refresh(Request())
         else:
             raise RuntimeError(
-                "OAuth credentials need reauthorization"
+                "OAuth token expired. Reauthorization required."
             )
+
+    return credentials
+
+
+def main():
+    print("=" * 45)
+    print("ASTRO MINUTE - YOUTUBE UPLOADER")
+    print("=" * 45)
+
+    if not VIDEO_FILE.is_file():
+        raise FileNotFoundError(
+            f"Missing MP4 file: {VIDEO_FILE}"
+        )
+
+    if VIDEO_FILE.stat().st_size == 0:
+        raise RuntimeError("MP4 file is empty.")
+
+    if not METADATA_FILE.is_file():
+        raise FileNotFoundError(
+            f"Missing metadata: {METADATA_FILE}"
+        )
+
+    metadata = json.loads(
+        METADATA_FILE.read_text(encoding="utf-8")
+    )
+
+    title = metadata["title"][:100]
+    description = metadata["description"][:5000]
+
+    print(f"Video title: {title}")
+    print(f"Privacy requested: {PRIVACY}")
+
+    credentials = get_credentials()
 
     youtube = build(
         "youtube",
@@ -54,13 +86,6 @@ def main():
         credentials=credentials,
         cache_discovery=False
     )
-
-    data = json.loads(
-        METADATA.read_text(encoding="utf-8")
-    )
-
-    title = data["title"][:100]
-    description = data["description"][:5000]
 
     body = {
         "snippet": {
@@ -73,17 +98,18 @@ def main():
                 "Space",
                 "Science",
                 "Astronomy",
+                "Space Facts",
                 "YouTube Shorts"
             ]
         },
         "status": {
-            "privacyStatus": "private",
+            "privacyStatus": PRIVACY,
             "selfDeclaredMadeForKids": False
         }
     }
 
     media = MediaFileUpload(
-        str(VIDEO),
+        str(VIDEO_FILE),
         mimetype="video/mp4",
         resumable=True,
         chunksize=5 * 1024 * 1024
@@ -100,17 +126,28 @@ def main():
     while response is None:
         progress, response = request.next_chunk()
 
-        if progress:
+        if progress is not None:
             print(
                 f"Upload progress: "
                 f"{progress.progress() * 100:.1f}%"
             )
 
     video_id = response["id"]
+    actual_privacy = response.get(
+        "status", {}
+    ).get("privacyStatus", "unknown")
 
-    print("YouTube upload successful!")
+    print("=" * 45)
+    print("YOUTUBE UPLOAD COMPLETED")
     print(f"Video URL: https://youtu.be/{video_id}")
-    print("Privacy: PRIVATE")
+    print(f"Reported privacy: {actual_privacy}")
+    print("=" * 45)
+
+    if actual_privacy != PRIVACY:
+        raise RuntimeError(
+            "YouTube did not confirm Public visibility. "
+            "Check YouTube Studio."
+        )
 
 
 if __name__ == "__main__":
