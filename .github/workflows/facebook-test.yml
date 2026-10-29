@@ -3,6 +3,9 @@ name: Astro Minute Facebook Reel Test
 
 on:
   workflow_dispatch:
+  
+  schedule:
+    - cron: '37 3 * * *'
 
 permissions:
   contents: read
