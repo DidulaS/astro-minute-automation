@@ -1,55 +1,161 @@
 
-name: Astro Minute Facebook Reel Test
+import json
+import os
+from pathlib import Path
+from urllib.parse import urlparse
 
-on:
-  workflow_dispatch:
+import requests
 
-permissions:
-  contents: read
+API_VERSION = "v26.0"
+GRAPH_URL = f"https://graph.facebook.com/{API_VERSION}"
 
-jobs:
-  facebook-test:
-    name: Create Facebook Reel Draft
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+VIDEO_FILE = Path("output/astro_minute_short.mp4")
+METADATA_FILE = Path("output/video_script.json")
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# Keep the first Facebook test as a draft
+VIDEO_STATE = "DRAFT"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
 
-      - name: Install FFmpeg and fonts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ffmpeg fonts-dejavu-core libass9
+def check_response(response, step):
+    try:
+        result = response.json()
+    except ValueError:
+        raise RuntimeError(
+            f"{step} failed with HTTP {response.status_code}"
+        )
 
-      - name: Install Python packages
-        run: |
-          python -m pip install \
-            edge-tts pillow requests
+    if not response.ok or "error" in result:
+        error = result.get("error", {})
 
-      - name: Generate script and narration
-        run: python main.py
+        raise RuntimeError(
+            f"{step} failed: "
+            f"code={error.get('code', response.status_code)}, "
+            f"message={error.get('message', 'Unknown error')}"
+        )
 
-      - name: Render Facebook Reel
-        run: python render_video.py
+    return result
 
-      - name: Test Facebook Reel draft
-        env:
-          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
-          FACEBOOK_PAGE_TOKEN: ${{ secrets.FACEBOOK_PAGE_TOKEN }}
-        run: python upload_facebook.py
 
-      - name: Save generated video
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: facebook-test-video
-          path: output/
-          if-no-files-found: warn
-          retention-days: 7
+def main():
+    print("ASTRO MINUTE FACEBOOK REELS TEST")
+
+    page_id = os.environ.get("FACEBOOK_PAGE_ID")
+    token = os.environ.get("FACEBOOK_PAGE_TOKEN")
+
+    if not page_id or not token:
+        raise RuntimeError(
+            "Facebook GitHub Secrets are missing."
+        )
+
+    if not VIDEO_FILE.is_file():
+        raise FileNotFoundError(VIDEO_FILE)
+
+    if not METADATA_FILE.is_file():
+        raise FileNotFoundError(METADATA_FILE)
+
+    metadata = json.loads(
+        METADATA_FILE.read_text(encoding="utf-8")
+    )
+
+    title = metadata["title"].replace(
+        "#Shorts", ""
+    ).strip()
+
+    description = metadata["description"]
+
+    video_size = VIDEO_FILE.stat().st_size
+
+    if video_size == 0:
+        raise RuntimeError("Video is empty.")
+
+    # --------------------------------------
+    # STEP 1 - START UPLOAD
+    # --------------------------------------
+
+    print("Starting Facebook Reel upload...")
+
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    response = requests.post(
+        f"{GRAPH_URL}/{page_id}/video_reels",
+        headers=headers,
+        data={"upload_phase": "start"},
+        timeout=60
+    )
+
+    result = check_response(response, "Start upload")
+
+    video_id = result["video_id"]
+    upload_url = result["upload_url"]
+
+    parsed = urlparse(upload_url)
+
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "rupload.facebook.com"
+    ):
+        raise RuntimeError("Invalid upload URL.")
+
+    # --------------------------------------
+    # STEP 2 - TRANSFER VIDEO
+    # --------------------------------------
+
+    print("Uploading MP4 video...")
+
+    upload_headers = {
+        "Authorization": f"OAuth {token}",
+        "offset": "0",
+        "file_size": str(video_size),
+        "Content-Type": "application/octet-stream"
+    }
+
+    with VIDEO_FILE.open("rb") as video:
+        response = requests.post(
+            upload_url,
+            headers=upload_headers,
+            data=video,
+            timeout=300
+        )
+
+    result = check_response(response, "Transfer video")
+
+    if result.get("success") is not True:
+        raise RuntimeError(
+            "Facebook did not confirm video upload."
+        )
+
+    # --------------------------------------
+    # STEP 3 - CREATE DRAFT
+    # --------------------------------------
+
+    print("Creating Facebook Reel draft...")
+
+    response = requests.post(
+        f"{GRAPH_URL}/{page_id}/video_reels",
+        headers=headers,
+        data={
+            "upload_phase": "finish",
+            "video_id": video_id,
+            "video_state": VIDEO_STATE,
+            "title": title,
+            "description": description
+        },
+        timeout=90
+    )
+
+    result = check_response(response, "Finish upload")
+
+    if result.get("success") is not True:
+        raise RuntimeError(
+            "Facebook did not confirm Reel draft."
+        )
+
+    print("FACEBOOK REEL DRAFT CREATED!")
+    print(f"Video ID: {video_id}")
+    print("Visibility: DRAFT")
+
+
+if __name__ == "__main__":
+    main()
