@@ -6,13 +6,18 @@ from urllib.parse import urlparse
 
 import requests
 
+
+# =====================================
+# ASTRO MINUTE FACEBOOK REELS UPLOADER
+# =====================================
+
 API_VERSION = "v26.0"
 GRAPH_URL = f"https://graph.facebook.com/{API_VERSION}"
 
 VIDEO_FILE = Path("output/astro_minute_short.mp4")
 METADATA_FILE = Path("output/video_script.json")
 
-# Keep the first Facebook test as a draft
+# Test mode: do not publish publicly
 VIDEO_STATE = "DRAFT"
 
 
@@ -21,7 +26,8 @@ def check_response(response, step):
         result = response.json()
     except ValueError:
         raise RuntimeError(
-            f"{step} failed with HTTP {response.status_code}"
+            f"{step}: HTTP {response.status_code}; "
+            "Facebook did not return JSON."
         )
 
     if not response.ok or "error" in result:
@@ -29,7 +35,8 @@ def check_response(response, step):
 
         raise RuntimeError(
             f"{step} failed: "
-            f"code={error.get('code', response.status_code)}, "
+            f"HTTP={response.status_code}, "
+            f"code={error.get('code', 'unknown')}, "
             f"message={error.get('message', 'Unknown error')}"
         )
 
@@ -37,58 +44,150 @@ def check_response(response, step):
 
 
 def main():
-    print("ASTRO MINUTE FACEBOOK REELS TEST")
+    print("ASTRO MINUTE FACEBOOK REELS TEST", flush=True)
 
-    page_id = os.environ.get("FACEBOOK_PAGE_ID")
-    token = os.environ.get("FACEBOOK_PAGE_TOKEN")
+    # -------------------------------------
+    # STEP 1 - READ GITHUB SECRETS
+    # -------------------------------------
 
-    if not page_id or not token:
-        raise RuntimeError(
-            "Facebook GitHub Secrets are missing."
-        )
+    page_id = os.environ.get("FACEBOOK_PAGE_ID", "").strip()
+    token = os.environ.get("FACEBOOK_PAGE_TOKEN", "").strip()
+
+    if not page_id:
+        raise RuntimeError("FACEBOOK_PAGE_ID is missing.")
+
+    if not token:
+        raise RuntimeError("FACEBOOK_PAGE_TOKEN is missing.")
+
+    if not page_id.isdigit():
+        raise RuntimeError("FACEBOOK_PAGE_ID must be numeric.")
+
+    # -------------------------------------
+    # STEP 2 - CHECK FILES
+    # -------------------------------------
 
     if not VIDEO_FILE.is_file():
-        raise FileNotFoundError(VIDEO_FILE)
+        raise FileNotFoundError(
+            f"Video file not found: {VIDEO_FILE}"
+        )
 
     if not METADATA_FILE.is_file():
-        raise FileNotFoundError(METADATA_FILE)
+        raise FileNotFoundError(
+            f"Metadata file not found: {METADATA_FILE}"
+        )
 
-    metadata = json.loads(
-        METADATA_FILE.read_text(encoding="utf-8")
-    )
+    with METADATA_FILE.open("r", encoding="utf-8") as file:
+        metadata = json.load(file)
 
-    title = metadata["title"].replace(
+    title = str(metadata.get("title", "Astro Minute")).replace(
         "#Shorts", ""
     ).strip()
 
-    description = metadata["description"]
+    description = str(
+        metadata.get("description", "Daily space facts.")
+    )
 
     video_size = VIDEO_FILE.stat().st_size
 
-    if video_size == 0:
-        raise RuntimeError("Video is empty.")
+    if video_size <= 0:
+        raise RuntimeError("The generated MP4 file is empty.")
 
-    # --------------------------------------
-    # STEP 1 - START UPLOAD
-    # --------------------------------------
+    print("Video file found.", flush=True)
+    print(f"Video size: {video_size} bytes", flush=True)
 
-    print("Starting Facebook Reel upload...")
+    # -------------------------------------
+    # STEP 3 - VERIFY FACEBOOK PAGE TOKEN
+    # -------------------------------------
+
+    print(
+        "Checking GitHub Facebook Page token...",
+        flush=True
+    )
 
     headers = {
         "Authorization": f"Bearer {token}"
     }
 
-    response = requests.post(
-        f"{GRAPH_URL}/me/video_reels",
+    response = requests.get(
+        f"{GRAPH_URL}/me",
         headers=headers,
-        data={"upload_phase": "start"},
+        params={"fields": "id,name"},
+        timeout=30
+    )
+
+    identity = check_response(
+        response,
+        "Verify Facebook Page token"
+    )
+
+    authenticated_id = str(identity.get("id", ""))
+    authenticated_name = identity.get("name", "Unknown")
+
+    print(
+        f"Authenticated identity: {authenticated_name}",
+        flush=True
+    )
+
+    print(
+        f"Authenticated ID: {authenticated_id}",
+        flush=True
+    )
+
+    print(
+        f"Configured Page ID: {page_id}",
+        flush=True
+    )
+
+    if authenticated_id != page_id:
+        raise RuntimeError(
+            "FACEBOOK_PAGE_TOKEN and FACEBOOK_PAGE_ID "
+            "do not match. Generate a Page Access Token "
+            "for the configured Facebook Page and update "
+            "the GitHub secret."
+        )
+
+    print(
+        "Facebook Page token matches!",
+        flush=True
+    )
+
+    # -------------------------------------
+    # STEP 4 - START FACEBOOK REEL
+    # -------------------------------------
+
+    reel_endpoint = f"{GRAPH_URL}/{page_id}/video_reels"
+
+    print(
+        "Starting Facebook Reel upload...",
+        flush=True
+    )
+
+    response = requests.post(
+        reel_endpoint,
+        headers=headers,
+        data={
+            "upload_phase": "start"
+        },
         timeout=60
     )
 
-    result = check_response(response, "Start upload")
+    result = check_response(
+        response,
+        "Start upload"
+    )
 
-    video_id = result["video_id"]
-    upload_url = result["upload_url"]
+    video_id = result.get("video_id")
+    upload_url = result.get("upload_url")
+
+    if not video_id:
+        raise RuntimeError(
+            "Facebook did not return a video_id."
+        )
+
+    if not upload_url:
+        raise RuntimeError(
+            "Facebook did not return an upload_url."
+        )
 
     parsed = urlparse(upload_url)
 
@@ -96,13 +195,23 @@ def main():
         parsed.scheme != "https"
         or parsed.hostname != "rupload.facebook.com"
     ):
-        raise RuntimeError("Invalid upload URL.")
+        raise RuntimeError(
+            "Facebook returned an unexpected upload URL."
+        )
 
-    # --------------------------------------
-    # STEP 2 - TRANSFER VIDEO
-    # --------------------------------------
+    print(
+        f"Reel upload session created: {video_id}",
+        flush=True
+    )
 
-    print("Uploading MP4 video...")
+    # -------------------------------------
+    # STEP 5 - UPLOAD MP4 TO FACEBOOK
+    # -------------------------------------
+
+    print(
+        "Uploading MP4 to Facebook...",
+        flush=True
+    )
 
     upload_headers = {
         "Authorization": f"OAuth {token}",
@@ -119,21 +228,32 @@ def main():
             timeout=300
         )
 
-    result = check_response(response, "Transfer video")
+    result = check_response(
+        response,
+        "Transfer MP4"
+    )
 
     if result.get("success") is not True:
         raise RuntimeError(
-            "Facebook did not confirm video upload."
+            "Facebook did not confirm MP4 transfer."
         )
 
-    # --------------------------------------
-    # STEP 3 - CREATE DRAFT
-    # --------------------------------------
+    print(
+        "MP4 uploaded successfully!",
+        flush=True
+    )
 
-    print("Creating Facebook Reel draft...")
+    # -------------------------------------
+    # STEP 6 - FINISH REEL AS DRAFT
+    # -------------------------------------
+
+    print(
+        "Finishing Facebook Reel as DRAFT...",
+        flush=True
+    )
 
     response = requests.post(
-        f"{GRAPH_URL}/me/video_reels",
+        reel_endpoint,
         headers=headers,
         data={
             "upload_phase": "finish",
@@ -145,16 +265,34 @@ def main():
         timeout=90
     )
 
-    result = check_response(response, "Finish upload")
+    result = check_response(
+        response,
+        "Finish Facebook Reel"
+    )
 
     if result.get("success") is not True:
         raise RuntimeError(
-            "Facebook did not confirm Reel draft."
+            "Facebook did not confirm Reel draft creation."
         )
 
-    print("FACEBOOK REEL DRAFT CREATED!")
-    print(f"Video ID: {video_id}")
-    print("Visibility: DRAFT")
+    # -------------------------------------
+    # DONE
+    # -------------------------------------
+
+    print(
+        "FACEBOOK REEL DRAFT CREATED!",
+        flush=True
+    )
+
+    print(
+        f"Video ID: {video_id}",
+        flush=True
+    )
+
+    print(
+        "Visibility: DRAFT",
+        flush=True
+    )
 
 
 if __name__ == "__main__":
