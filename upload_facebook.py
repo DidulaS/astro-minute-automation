@@ -18,7 +18,7 @@ VIDEO_FILE = Path("output/astro_minute_short.mp4")
 METADATA_FILE = Path("output/video_script.json")
 
 # Test mode: do not publish publicly
-VIDEO_STATE = "DRAFT"
+VIDEO_STATE = "PUBLISHED"
 
 
 def check_response(response, step):
