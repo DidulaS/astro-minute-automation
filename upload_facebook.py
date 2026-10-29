@@ -1,0 +1,55 @@
+
+name: Astro Minute Facebook Reel Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  facebook-test:
+    name: Create Facebook Reel Draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg fonts-dejavu-core libass9
+
+      - name: Install Python packages
+        run: |
+          python -m pip install \
+            edge-tts pillow requests
+
+      - name: Generate script and narration
+        run: python main.py
+
+      - name: Render Facebook Reel
+        run: python render_video.py
+
+      - name: Test Facebook Reel draft
+        env:
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          FACEBOOK_PAGE_TOKEN: ${{ secrets.FACEBOOK_PAGE_TOKEN }}
+        run: python upload_facebook.py
+
+      - name: Save generated video
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-test-video
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
