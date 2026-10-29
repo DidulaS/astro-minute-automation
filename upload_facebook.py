@@ -79,7 +79,7 @@ def main():
     }
 
     response = requests.post(
-        f"{GRAPH_URL}/{page_id}/video_reels",
+        f"{GRAPH_URL}/me/video_reels",
         headers=headers,
         data={"upload_phase": "start"},
         timeout=60
@@ -133,7 +133,7 @@ def main():
     print("Creating Facebook Reel draft...")
 
     response = requests.post(
-        f"{GRAPH_URL}/{page_id}/video_reels",
+        f"{GRAPH_URL}/me/video_reels",
         headers=headers,
         data={
             "upload_phase": "finish",
