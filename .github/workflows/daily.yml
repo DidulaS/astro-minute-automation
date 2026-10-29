@@ -5,9 +5,8 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Daily at 9:00 AM Sri Lanka time
-    # 03:30 UTC = 09:00 Asia/Colombo
-    - cron: '30 3 * * *'
+    - cron: '7 9 * * *'
+      timezone: 'Asia/Colombo'
 
 permissions:
   contents: read
