@@ -4,10 +4,7 @@ name: Astro Minute Daily Automation
 on:
   workflow_dispatch:
   schedule:
-    - cron: '7 9 * * *'
-      timezone: 'Asia/Colombo'
-    - cron: '22 9 * * *'
-      timezone: 'Asia/Colombo'
+
 
 permissions:
   contents: read
